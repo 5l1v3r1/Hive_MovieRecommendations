@@ -1,0 +1,66 @@
+--create initial table
+CREATE TABLE ratingsKH (userID STRING, movieID STRING, rating INT, ratedWhen INT) ROW FORMAT 
+DELIMITED FIELDS TERMINATED BY "\t"
+LINES TERMINATED BY "\n" 
+STORED AS TEXTFILE;
+
+--load data
+LOAD DATA INPATH "rec.data" INTO TABLE ratingsKH;
+
+--grab only positive ratings (4 or 5)
+CREATE TABLE positiveKH AS
+SELECT *
+FROM ratingsKH
+WHERE rating > 3;
+
+--create duplicate for joining (implicit joins not supported in 0.10)
+CREATE TABLE duplicateKH AS
+SELECT *
+FROM positiveKH;
+
+--pair users together that have rated the same movie highly (4 or 5)
+CREATE TABLE positivePairsKH AS
+SELECT positiveKH.userID as recUser, positiveKH.movieID as recMovie, duplicateKH.rating as rating, duplicateKH.movieID as matchMovie, duplicateKH.userID as matchUser
+FROM positiveKH JOIN duplicateKH ON (positiveKH.movieID = duplicateKH.movieID);
+
+--count the number of highly rated movies that users have in common
+CREATE TABLE commonLikesKH AS
+SELECT count(rating) as commonLikes, recUser, matchUser
+FROM positivePairsKH
+GROUP BY recUser, matchUser;
+
+--figure out max number of high ratings each user has in common with another user (different from themselves)
+CREATE TABLE mostCommonKH AS
+SELECT  recUser, max(commonLikes) as commonLikes
+FROM commonLikesKH
+WHERE recUser <> matchUser
+GROUP BY recUser;
+
+--pair each user with different user that is best 'match' 
+CREATE TABLE bestMatchKH AS
+SELECT mostCommonKH.recUser as recUser, commonLikesKH.matchUser as bestMatch
+FROM mostCommonKH JOIN commonLikesKH ON (mostCommonKH.commonLikes = commonLikesKH.commonLikes AND mostCommonKH.recUser = commonLikesKH.recUser);
+
+--Given a userID, return its best match (276)
+SELECT bestMatch
+FROM bestMatchKH 
+WHERE recUser = 1;
+
+--Given a userID, return all movies they have already seen ()
+CREATE TABLE moviesSeenKH AS
+SELECT movieID
+FROM ratingsKH 
+WHERE userID = 1;
+
+--All movies that user's best match has seen
+CREATE TABLE possibleRecsKH AS
+SELECT movieID
+FROM positiveKH 
+WHERE userID = 276;
+
+--Using EXCEPT equivalent, return movies user has not seen but ones their best 'match' has rated highly 
+SELECT possibleRecsKH.movieID
+FROM possibleRecsKH LEFT OUTER JOIN moviesSeenKH ON (possibleRecsKH.movieID = moviesSeenKH.movieID)
+WHERE moviesSeenKH.movieID IS NULL;
+
+
